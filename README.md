@@ -1,79 +1,101 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# AppGuard
 
-# Getting Started
+**AppGuard** is an MDM-lite Android app built with React Native that enforces a simple policy: only apps installed from the Google Play Store are considered compliant. Apps sideloaded via APK or unknown sources are detected and surfaced to the user.
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+## Features (Phase 1 — MVP)
 
-## Step 1: Start the Metro Server
+- Native Android module scans all installed apps and reads installer source (`getInstallSourceInfo` on API 30+, `getInstallerPackageName` on older APIs)
+- Dashboard with compliance score and manual scan
+- Unauthorized apps list with "How to Remove" → opens Android app settings
+- All apps browser with search and filter tabs (All / Authorized / Unauthorized)
+- Dark-themed UI
+- Local notifications when unauthorized apps are found (after scan)
+- Settings: notification toggle, whitelist, JSON export report
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+## Phase 2 (planned)
 
-To start Metro, run the following command from the _root_ of your React Native project:
+- Background monitoring via `BroadcastReceiver` (`ACTION_PACKAGE_ADDED`)
+- Admin PIN lock for settings
+- PDF export
+- Firebase remote policy
+- MDM enrollment flow
+
+## Tech Stack
+
+- React Native 0.76.9 (CLI, TypeScript)
+- Java native module (`InstalledAppsModule`)
+- React Navigation (Stack)
+- AsyncStorage, Notifee, react-native-vector-icons
+- react-native-background-fetch (installed for Phase 2)
+
+## Project Structure
+
+```
+AppGuard/
+├── android/app/src/main/java/com/appguard/
+│   ├── InstalledAppsModule.java
+│   └── InstalledAppsPackage.java
+├── src/
+│   ├── screens/          # Home, Unauthorized, AllApps, Settings
+│   ├── components/       # AppCard, StatusBadge, ScanButton
+│   ├── services/         # AppScanService, NotificationService
+│   ├── hooks/            # useInstalledApps
+│   └── utils/            # constants, theme colors
+└── App.tsx
+```
+
+## Prerequisites
+
+- Node.js 18+
+- JDK 17
+- Android Studio with SDK 34+
+- Physical Android device (recommended for accurate installer data)
+
+## Setup
 
 ```bash
-# using npm
+cd AppGuard
+npm install
+```
+
+## Run on Android
+
+1. Enable USB debugging on your device
+2. Connect device via USB
+3. Start Metro and build:
+
+```bash
 npm start
-
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Start your Application
-
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
-
-### For Android
-
-```bash
-# using npm
 npm run android
-
-# OR using Yarn
-yarn android
 ```
 
-### For iOS
+## Permissions
 
-```bash
-# using npm
-npm run ios
+The app requests:
 
-# OR using Yarn
-yarn ios
-```
+- `QUERY_ALL_PACKAGES` — list all installed apps (required for scanning)
+- `POST_NOTIFICATIONS` — alert on unauthorized apps
+- `RECEIVE_BOOT_COMPLETED` / `FOREGROUND_SERVICE` — reserved for Phase 2 background monitoring
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
+> **Note:** `QUERY_ALL_PACKAGES` requires a privacy policy and Play Store approval for public distribution. Suitable for internal/enterprise MVP use.
 
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
+## How Compliance Works
 
-## Step 3: Modifying your App
+| Installer | Status |
+|-----------|--------|
+| `com.android.vending` | Authorized (Play Store) |
+| `com.google.android.packageinstaller` | Authorized (system updates) |
+| `null` / empty | Unauthorized (sideloaded/ADB) unless system app |
+| System apps (`FLAG_SYSTEM`) | Excluded from unauthorized list |
 
-Now that you have successfully run the app, let's modify it.
+Whitelisted package names (Settings) are always treated as authorized.
 
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
+## Testing Tips
 
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
+- Install a test APK via `adb install app.apk` — it should appear as unauthorized
+- Play Store apps show installer `com.android.vending`
+- Test on a **real device**; emulators may return incomplete installer metadata
 
-## Congratulations! :tada:
+## License
 
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+Internal / educational use — Cyber Security project MVP.

@@ -1,118 +1,74 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, {useEffect} from 'react';
+import {StatusBar} from 'react-native';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
-
+  NavigationContainer,
+  useNavigationContainerRef,
+} from '@react-navigation/native';
+import {createStackNavigator} from '@react-navigation/stack';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
+import {HomeScreen} from './src/screens/HomeScreen';
+import {UnauthorizedAppsScreen} from './src/screens/UnauthorizedAppsScreen';
+import {AllAppsScreen} from './src/screens/AllAppsScreen';
+import {SettingsScreen} from './src/screens/SettingsScreen';
 import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+  initNotifications,
+  setupNotificationHandlers,
+} from './src/services/NotificationService';
+import {COLORS} from './src/utils/constants';
+import type {RootStackParamList} from './src/types/navigation';
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
-
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+const Stack = createStackNavigator<RootStackParamList>();
 
 function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
+  useEffect(() => {
+    initNotifications();
+  }, []);
+
+  useEffect(() => {
+    return setupNotificationHandlers(() => {
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('UnauthorizedApps');
+      }
+    });
+  }, [navigationRef]);
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
+    <GestureHandlerRootView style={{flex: 1}}>
+      <NavigationContainer ref={navigationRef}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <Stack.Navigator
+          screenOptions={{
+            headerStyle: {backgroundColor: COLORS.card},
+            headerTintColor: COLORS.textPrimary,
+            headerTitleStyle: {fontWeight: '700'},
+            cardStyle: {backgroundColor: COLORS.background},
           }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+          <Stack.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{headerShown: false}}
+          />
+          <Stack.Screen
+            name="UnauthorizedApps"
+            component={UnauthorizedAppsScreen}
+            options={{title: 'Unauthorized Apps'}}
+          />
+          <Stack.Screen
+            name="AllApps"
+            component={AllAppsScreen}
+            options={{title: 'All Apps'}}
+          />
+          <Stack.Screen
+            name="Settings"
+            component={SettingsScreen}
+            options={{title: 'Settings'}}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
 
 export default App;
