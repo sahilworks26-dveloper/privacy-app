@@ -5,7 +5,10 @@ export type RootStackParamList = {
   Home: undefined;
   UnauthorizedApps: undefined;
   AllApps: undefined;
+  PinLock: {redirectTo: 'Settings' | 'Enrollment'};
   Settings: undefined;
+  SetPin: undefined;
+  Enrollment: undefined;
 };
 
 export type HomeScreenNavigationProp = StackNavigationProp<
@@ -27,5 +30,12 @@ export type SettingsScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
   'Settings'
 >;
+
+export type PinLockScreenNavigationProp = StackNavigationProp<
+  RootStackParamList,
+  'PinLock'
+>;
+
+export type PinLockScreenRouteProp = RouteProp<RootStackParamList, 'PinLock'>;
 
 export type HomeScreenRouteProp = RouteProp<RootStackParamList, 'Home'>;

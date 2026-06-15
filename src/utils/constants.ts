@@ -26,4 +26,16 @@ export const STORAGE_KEYS = {
   BACKGROUND_MONITORING: '@appguard/backgroundMonitoring',
   NOTIFY_UNAUTHORIZED: '@appguard/notifyUnauthorized',
   WHITELIST: '@appguard/whitelist',
+  ADMIN_PIN_HASH: '@appguard/adminPinHash',
+  POLICY_URL: '@appguard/policyUrl',
+  REMOTE_POLICY: '@appguard/remotePolicy',
+  ENROLLMENT_STATUS: '@appguard/enrollmentStatus',
+  ENROLLMENT_SERVER: '@appguard/enrollmentServer',
+  LAST_BACKGROUND_SCAN: '@appguard/lastBackgroundScan',
+  KNOWN_PACKAGES: '@appguard/knownPackages',
 } as const;
+
+export const DEFAULT_POLICY_URL = '';
+export const DEFAULT_ENROLLMENT_SERVER = '';
+
+export const BACKGROUND_FETCH_INTERVAL_MINUTES = 15;

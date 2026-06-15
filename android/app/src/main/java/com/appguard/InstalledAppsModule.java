@@ -6,13 +6,17 @@ import android.content.pm.InstallSourceInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.pdf.PdfDocument;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import android.util.Base64;
 
 import androidx.annotation.NonNull;
+import androidx.core.content.FileProvider;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -23,16 +27,12 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.Arguments;
 
 import java.io.ByteArrayOutputStream;
-import java.util.Arrays;
-import java.util.List;
+import java.io.File;
+import java.io.FileOutputStream;
 
 public class InstalledAppsModule extends ReactContextBaseJavaModule {
 
     private static final String MODULE_NAME = "InstalledApps";
-    private static final List<String> ALLOWED_INSTALLERS = Arrays.asList(
-            "com.android.vending",
-            "com.google.android.packageinstaller"
-    );
 
     public InstalledAppsModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -51,23 +51,22 @@ public class InstalledAppsModule extends ReactContextBaseJavaModule {
             String selfPackage = getReactApplicationContext().getPackageName();
             List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
             WritableArray result = Arguments.createArray();
+            AppComplianceChecker checker = new AppComplianceChecker(getReactApplicationContext());
 
             for (ApplicationInfo appInfo : packages) {
                 if (appInfo.packageName.equals(selfPackage)) {
                     continue;
                 }
 
-                WritableMap appMap = Arguments.createMap();
-                CharSequence label = pm.getApplicationLabel(appInfo);
-                String appName = label != null ? label.toString() : appInfo.packageName;
-                boolean isSystemApp = (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-                String installerPackage = getInstallerPackageName(pm, appInfo.packageName);
+                AppComplianceChecker.ComplianceResult compliance =
+                        checker.checkPackage(appInfo.packageName);
 
-                appMap.putString("packageName", appInfo.packageName);
-                appMap.putString("appName", appName);
-                appMap.putString("installerPackage", installerPackage != null ? installerPackage : "");
-                appMap.putBoolean("isSystemApp", isSystemApp);
-                appMap.putBoolean("isAuthorized", isAuthorized(installerPackage, isSystemApp));
+                WritableMap appMap = Arguments.createMap();
+                appMap.putString("packageName", compliance.packageName);
+                appMap.putString("appName", compliance.appName);
+                appMap.putString("installerPackage", compliance.installerPackage);
+                appMap.putBoolean("isSystemApp", compliance.isSystemApp);
+                appMap.putBoolean("isAuthorized", compliance.isAuthorized);
                 appMap.putString("icon", getAppIconBase64(pm, appInfo));
 
                 result.pushMap(appMap);
@@ -77,6 +76,157 @@ public class InstalledAppsModule extends ReactContextBaseJavaModule {
         } catch (Exception e) {
             promise.reject("GET_APPS_ERROR", e.getMessage(), e);
         }
+    }
+
+    @ReactMethod
+    public void getAppInfo(String packageName, Promise promise) {
+        try {
+            AppComplianceChecker checker = new AppComplianceChecker(getReactApplicationContext());
+            AppComplianceChecker.ComplianceResult compliance = checker.checkPackage(packageName);
+            WritableMap appMap = Arguments.createMap();
+            appMap.putString("packageName", compliance.packageName);
+            appMap.putString("appName", compliance.appName);
+            appMap.putString("installerPackage", compliance.installerPackage);
+            appMap.putBoolean("isSystemApp", compliance.isSystemApp);
+            appMap.putBoolean("isAuthorized", compliance.isAuthorized);
+            promise.resolve(appMap);
+        } catch (Exception e) {
+            promise.reject("GET_APP_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void syncMonitoringSettings(boolean monitoringEnabled, boolean notifyEnabled, Promise promise) {
+        try {
+            ReactApplicationContext context = getReactApplicationContext();
+            AppGuardPrefs.setMonitoringEnabled(context, monitoringEnabled);
+            AppGuardPrefs.setNotifyEnabled(context, notifyEnabled);
+
+            if (monitoringEnabled) {
+                InstallMonitorService.start(context);
+            } else {
+                InstallMonitorService.stop(context);
+            }
+
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("SYNC_MONITORING_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void syncWhitelist(String whitelistJson, Promise promise) {
+        try {
+            AppGuardPrefs.setWhitelistJson(getReactApplicationContext(), whitelistJson);
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("SYNC_WHITELIST_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void syncRemotePolicy(String allowedInstallersJson, Promise promise) {
+        try {
+            AppGuardPrefs.setRemoteAllowedInstallers(getReactApplicationContext(), allowedInstallersJson);
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("SYNC_POLICY_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void getDeviceId(Promise promise) {
+        try {
+            String androidId = Settings.Secure.getString(
+                    getReactApplicationContext().getContentResolver(),
+                    Settings.Secure.ANDROID_ID);
+            promise.resolve(androidId != null ? androidId : "unknown");
+        } catch (Exception e) {
+            promise.reject("DEVICE_ID_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void exportReportPdf(String reportText, Promise promise) {
+        try {
+            File cacheDir = getReactApplicationContext().getCacheDir();
+            File pdfFile = new File(cacheDir, "appguard-report-" + System.currentTimeMillis() + ".pdf");
+
+            PdfDocument document = new PdfDocument();
+            Paint paint = new Paint();
+            paint.setTextSize(11f);
+            paint.setAntiAlias(true);
+
+            int pageWidth = 595;
+            int pageHeight = 842;
+            int margin = 40;
+            int lineHeight = 16;
+            int y = margin;
+            int pageNumber = 1;
+
+            PdfDocument.Page page = startPdfPage(document, pageWidth, pageHeight, pageNumber);
+            Canvas canvas = page.getCanvas();
+
+            String[] lines = reportText.split("\n");
+            for (String line : lines) {
+                if (y > pageHeight - margin) {
+                    document.finishPage(page);
+                    pageNumber++;
+                    page = startPdfPage(document, pageWidth, pageHeight, pageNumber);
+                    canvas = page.getCanvas();
+                    y = margin;
+                }
+                canvas.drawText(line, margin, y, paint);
+                y += lineHeight;
+            }
+
+            document.finishPage(page);
+
+            try (FileOutputStream outputStream = new FileOutputStream(pdfFile)) {
+                document.writeTo(outputStream);
+            }
+            document.close();
+
+            String authority = getReactApplicationContext().getPackageName() + ".fileprovider";
+            Uri contentUri = FileProvider.getUriForFile(getReactApplicationContext(), authority, pdfFile);
+
+            WritableMap result = Arguments.createMap();
+            result.putString("filePath", pdfFile.getAbsolutePath());
+            result.putString("contentUri", contentUri.toString());
+            promise.resolve(result);
+        } catch (Exception e) {
+            promise.reject("PDF_EXPORT_ERROR", e.getMessage(), e);
+        }
+    }
+
+    private PdfDocument.Page startPdfPage(PdfDocument document, int width, int height, int pageNumber) {
+        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(width, height, pageNumber).create();
+        return document.startPage(pageInfo);
+    }
+
+    @ReactMethod
+    public void shareFile(String contentUri, String mimeType, Promise promise) {
+        try {
+            Intent shareIntent = new Intent(Intent.ACTION_SEND);
+            shareIntent.setType(mimeType);
+            shareIntent.putExtra(Intent.EXTRA_STREAM, Uri.parse(contentUri));
+            shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            Intent chooser = Intent.createChooser(shareIntent, "Share AppGuard Report");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getReactApplicationContext().startActivity(chooser);
+            promise.resolve(true);
+        } catch (Exception e) {
+            promise.reject("SHARE_ERROR", e.getMessage(), e);
+        }
+    }
+
+    @ReactMethod
+    public void consumePendingNavigation(Promise promise) {
+        String route = MainActivity.pendingRoute;
+        MainActivity.pendingRoute = null;
+        promise.resolve(route);
     }
 
     @ReactMethod
@@ -90,39 +240,6 @@ public class InstalledAppsModule extends ReactContextBaseJavaModule {
         } catch (Exception e) {
             promise.reject("OPEN_SETTINGS_ERROR", e.getMessage(), e);
         }
-    }
-
-    private String getInstallerPackageName(PackageManager pm, String packageName) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                InstallSourceInfo sourceInfo = pm.getInstallSourceInfo(packageName);
-                if (sourceInfo != null) {
-                    String initiating = sourceInfo.getInitiatingPackageName();
-                    if (initiating != null && !initiating.isEmpty()) {
-                        return initiating;
-                    }
-                    String installing = sourceInfo.getInstallingPackageName();
-                    if (installing != null && !installing.isEmpty()) {
-                        return installing;
-                    }
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                return pm.getInstallerPackageName(packageName);
-            }
-        } catch (PackageManager.NameNotFoundException ignored) {
-            return null;
-        }
-        return null;
-    }
-
-    private boolean isAuthorized(String installerPackage, boolean isSystemApp) {
-        if (isSystemApp) {
-            return true;
-        }
-        if (installerPackage == null || installerPackage.isEmpty()) {
-            return false;
-        }
-        return ALLOWED_INSTALLERS.contains(installerPackage);
     }
 
     private String getAppIconBase64(PackageManager pm, ApplicationInfo appInfo) {
@@ -164,3 +281,4 @@ public class InstalledAppsModule extends ReactContextBaseJavaModule {
         return bitmap;
     }
 }
+

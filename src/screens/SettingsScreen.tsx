@@ -1,8 +1,8 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
-  Share,
   StyleSheet,
   Switch,
   Text,
@@ -15,29 +15,57 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {
   getWhitelist,
   scanInstalledApps,
+  syncWhitelistToNative,
 } from '../services/AppScanService';
+import {
+  setBackgroundMonitoring,
+  syncMonitoringToNative,
+} from '../services/BackgroundMonitorService';
+import {
+  fetchRemotePolicy,
+  getPolicyUrl,
+  getStoredPolicy,
+  setPolicyUrl,
+} from '../services/PolicyService';
+import {
+  exportJsonReport,
+  exportPdfReport,
+  exportTextReport,
+} from '../services/ReportService';
+import {requestNotificationPermission} from '../services/NotificationService';
 import {STORAGE_KEYS, COLORS} from '../utils/constants';
 import type {SettingsScreenNavigationProp} from '../types/navigation';
+import type {RemotePolicy} from '../types/app';
 
 interface SettingsScreenProps {
   navigation: SettingsScreenNavigationProp;
 }
 
-export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
+export function SettingsScreen({
+  navigation,
+}: SettingsScreenProps): React.JSX.Element {
   const [backgroundMonitoring, setBackgroundMonitoring] = useState(false);
   const [notifyUnauthorized, setNotifyUnauthorized] = useState(true);
   const [whitelistInput, setWhitelistInput] = useState('');
   const [whitelist, setWhitelist] = useState<string[]>([]);
+  const [policyUrl, setPolicyUrlInput] = useState('');
+  const [policy, setPolicy] = useState<RemotePolicy | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const loadSettings = useCallback(async () => {
-    const [bg, notify, list] = await Promise.all([
+    const [bg, notify, list, url, storedPolicy] = await Promise.all([
       AsyncStorage.getItem(STORAGE_KEYS.BACKGROUND_MONITORING),
       AsyncStorage.getItem(STORAGE_KEYS.NOTIFY_UNAUTHORIZED),
       getWhitelist(),
+      getPolicyUrl(),
+      getStoredPolicy(),
     ]);
     setBackgroundMonitoring(bg === 'true');
     setNotifyUnauthorized(notify !== 'false');
     setWhitelist(list);
+    setPolicyUrlInput(url);
+    setPolicy(storedPolicy);
   }, []);
 
   useEffect(() => {
@@ -46,14 +74,12 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
 
   const toggleBackground = async (value: boolean) => {
     setBackgroundMonitoring(value);
-    await AsyncStorage.setItem(
-      STORAGE_KEYS.BACKGROUND_MONITORING,
-      value.toString(),
-    );
+    await setBackgroundMonitoring(value);
     if (value) {
+      await requestNotificationPermission();
       Alert.alert(
-        'Background Monitoring',
-        'Full background install monitoring (BroadcastReceiver) is planned for Phase 2. The preference has been saved.',
+        'Monitoring Active',
+        'AppGuard will monitor new installs via BroadcastReceiver and periodic background checks.',
       );
     }
   };
@@ -64,6 +90,7 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
       STORAGE_KEYS.NOTIFY_UNAUTHORIZED,
       value.toString(),
     );
+    await syncMonitoringToNative();
   };
 
   const addToWhitelist = async () => {
@@ -82,6 +109,7 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
       STORAGE_KEYS.WHITELIST,
       JSON.stringify(updated),
     );
+    await syncWhitelistToNative();
   };
 
   const removeFromWhitelist = async (pkg: string) => {
@@ -91,33 +119,41 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
       STORAGE_KEYS.WHITELIST,
       JSON.stringify(updated),
     );
+    await syncWhitelistToNative();
   };
 
-  const exportReport = async () => {
+  const handleFetchPolicy = async () => {
+    setPolicyLoading(true);
+    try {
+      await setPolicyUrl(policyUrl);
+      const remote = await fetchRemotePolicy(policyUrl);
+      setPolicy(remote);
+      Alert.alert('Policy updated', `Policy v${remote.version} applied.`);
+    } catch (err) {
+      Alert.alert(
+        'Policy fetch failed',
+        err instanceof Error ? err.message : 'Could not fetch policy',
+      );
+    } finally {
+      setPolicyLoading(false);
+    }
+  };
+
+  const handleExport = async (format: 'json' | 'text' | 'pdf') => {
+    setExporting(true);
     try {
       const result = await scanInstalledApps();
-      const report = {
-        generatedAt: new Date().toISOString(),
-        summary: {
-          totalUserApps: result.totalScanned,
-          compliant: result.compliantCount,
-          unauthorized: result.unauthorized.length,
-        },
-        apps: result.apps.map(app => ({
-          appName: app.appName,
-          packageName: app.packageName,
-          installer: app.installerPackage || 'unknown',
-          isSystemApp: app.isSystemApp,
-          isAuthorized: app.isAuthorized,
-        })),
-      };
-
-      await Share.share({
-        message: JSON.stringify(report, null, 2),
-        title: 'AppGuard Compliance Report',
-      });
+      if (format === 'json') {
+        await exportJsonReport(result);
+      } else if (format === 'text') {
+        await exportTextReport(result);
+      } else {
+        await exportPdfReport(result);
+      }
     } catch {
       Alert.alert('Export failed', 'Could not generate compliance report.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -129,7 +165,9 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
           <View style={styles.row}>
             <View style={styles.rowText}>
               <Text style={styles.label}>Enable background monitoring</Text>
-              <Text style={styles.hint}>Phase 2 — saves preference only</Text>
+              <Text style={styles.hint}>
+                BroadcastReceiver + 15 min periodic scan
+              </Text>
             </View>
             <Switch
               value={backgroundMonitoring}
@@ -140,7 +178,7 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
           <View style={styles.row}>
             <View style={styles.rowText}>
               <Text style={styles.label}>Notify on unauthorized install</Text>
-              <Text style={styles.hint}>Alert after manual scans</Text>
+              <Text style={styles.hint}>Real-time and background alerts</Text>
             </View>
             <Switch
               value={notifyUnauthorized}
@@ -148,6 +186,51 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
               trackColor={{false: COLORS.border, true: COLORS.green}}
             />
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Remote Policy</Text>
+          <Text style={styles.hint}>
+            Fetch allowed installers from your policy server (JSON).
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={policyUrl}
+            onChangeText={setPolicyUrlInput}
+            placeholder="https://policy.example.com/appguard.json"
+            placeholderTextColor={COLORS.textSecondary}
+            autoCapitalize="none"
+          />
+          <TouchableOpacity
+            style={styles.button}
+            onPress={handleFetchPolicy}
+            disabled={policyLoading}>
+            {policyLoading ? (
+              <ActivityIndicator color={COLORS.textPrimary} />
+            ) : (
+              <Text style={styles.buttonText}>Fetch & Apply Policy</Text>
+            )}
+          </TouchableOpacity>
+          {policy && (
+            <Text style={styles.policyMeta}>
+              Active policy v{policy.version} ·{' '}
+              {policy.allowedInstallers.length} allowed installers
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Security</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => navigation.navigate('SetPin')}>
+            <Text style={styles.buttonText}>Manage Admin PIN</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryBtn]}
+            onPress={() => navigation.navigate('Enrollment')}>
+            <Text style={styles.buttonText}>MDM Enrollment</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
@@ -178,15 +261,25 @@ export function SettingsScreen({}: SettingsScreenProps): React.JSX.Element {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Reports</Text>
-          <TouchableOpacity style={styles.button} onPress={exportReport}>
-            <Text style={styles.buttonText}>Export Compliance Report (JSON)</Text>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => handleExport('json')}
+            disabled={exporting}>
+            <Text style={styles.buttonText}>Export JSON</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryBtn]}
+            onPress={() => handleExport('text')}
+            disabled={exporting}>
+            <Text style={styles.buttonText}>Export Text</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, styles.secondaryBtn]}
+            onPress={() => handleExport('pdf')}
+            disabled={exporting}>
+            <Text style={styles.buttonText}>Export PDF</Text>
           </TouchableOpacity>
         </View>
-
-        <Text style={styles.phaseNote}>
-          Phase 2 (not yet implemented): real-time BroadcastReceiver monitoring,
-          admin PIN lock, PDF export, Firebase policy push, MDM enrollment.
-        </Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -252,9 +345,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
+  secondaryBtn: {
+    marginTop: 8,
+    backgroundColor: COLORS.green,
+  },
   buttonText: {
     color: COLORS.textPrimary,
     fontWeight: '700',
+  },
+  policyMeta: {
+    color: COLORS.textSecondary,
+    fontSize: 12,
+    marginTop: 10,
   },
   whitelistItem: {
     flexDirection: 'row',
@@ -273,12 +375,5 @@ const styles = StyleSheet.create({
   removeLink: {
     color: COLORS.red,
     fontWeight: '600',
-  },
-  phaseNote: {
-    color: COLORS.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-    textAlign: 'center',
-    marginTop: 8,
   },
 });

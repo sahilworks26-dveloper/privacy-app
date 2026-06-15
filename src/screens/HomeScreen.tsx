@@ -12,6 +12,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import {ScanButton} from '../components/ScanButton';
 import {useInstalledApps} from '../hooks/useInstalledApps';
 import {getComplianceColor} from '../services/AppScanService';
+import {isPinSet} from '../services/PinService';
 import {COLORS} from '../utils/constants';
 import type {HomeScreenNavigationProp} from '../types/navigation';
 
@@ -30,6 +31,17 @@ export function HomeScreen({navigation}: HomeScreenProps): React.JSX.Element {
   const compliancePercent =
     total > 0 ? Math.round((compliant / total) * 100) : 0;
 
+  const openProtectedScreen = async (
+    redirectTo: 'Settings' | 'Enrollment',
+  ) => {
+    const pinRequired = await isPinSet();
+    if (pinRequired) {
+      navigation.navigate('PinLock', {redirectTo});
+    } else {
+      navigation.navigate(redirectTo);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -37,7 +49,7 @@ export function HomeScreen({navigation}: HomeScreenProps): React.JSX.Element {
           <Icon name="shield-check" size={32} color={COLORS.green} />
           <Text style={styles.title}>AppGuard</Text>
           <TouchableOpacity
-            onPress={() => navigation.navigate('Settings')}
+            onPress={() => openProtectedScreen('Settings')}
             style={styles.settingsButton}>
             <Icon name="cog" size={24} color={COLORS.textSecondary} />
           </TouchableOpacity>
@@ -94,6 +106,12 @@ export function HomeScreen({navigation}: HomeScreenProps): React.JSX.Element {
             <Text style={styles.secondaryLabel}>View Unauthorized</Text>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => openProtectedScreen('Enrollment')}>
+          <Text style={styles.linkText}>MDM Enrollment →</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.linkButton}

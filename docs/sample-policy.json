@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "allowedInstallers": [
+    "com.android.vending",
+    "com.google.android.packageinstaller"
+  ],
+  "blockSideloading": true
+}
